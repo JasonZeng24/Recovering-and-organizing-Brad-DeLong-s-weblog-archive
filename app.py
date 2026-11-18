@@ -13,9 +13,7 @@ import streamlit.components.v1 as components
 
 # --- 1. 数据库路径与 GitHub Release 配置 ---
 DB_PATH = "weblog_corpus.db"
-# 本地已有 weblog_corpus.db 时会直接使用本地文件；
-# 部署到 Streamlit Cloud 前，请将合并后的新版 weblog_corpus.db 上传至 GitHub Release（如 V3.0）并更新下方链接
-RELEASE_URL = "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-/releases/download/V3.0/weblog_corpus.db"
+RELEASE_URL = "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-/releases/download/V3.1/weblog_corpus.db"
 
 st.set_page_config(
     page_title="Brad DeLong's Weblog Archive (1995–Present)",
@@ -43,7 +41,6 @@ def get_db_connection():
 
 @st.cache_data(show_spinner=False)
 def get_posts_columns() -> set[str]:
-    """检测当前 weblog_corpus.db 包含的字段，确保新旧库 100% 兼容。"""
     conn = get_db_connection()
     try:
         return {row[1] for row in conn.execute("PRAGMA table_info(posts)").fetchall()}
@@ -59,11 +56,19 @@ HAS_MERGED_SCHEMA = {
     "exact_post_datetime",
 }.issubset(POSTS_COLS)
 HAS_TYPEPAD_SCHEMA = {"corpus_era", "categories"}.issubset(POSTS_COLS)
+HAS_GENRE_SCHEMA = "post_genre" in POSTS_COLS
+
+GENRE_LABELS = {
+    "essay_or_column": ("✍️ Original Essay / Column", "green"),
+    "quote_commentary": ("💬 Quote + Commentary", "blue"),
+    "clipping_or_mail": ("📎 Clipping / Reader Mail", "gray"),
+    "link_roundup": ("🔗 Link Roundup", "orange"),
+    "teaching_or_meta": ("🎓 Teaching / Meta", "violet"),
+}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_recovered_assets(post_id: int):
-    """返回指定文章已从 Wayback 找回的图片列表 (orig_path, wayback_url)。"""
     conn = get_db_connection()
     try:
         has = conn.execute(
@@ -82,7 +87,7 @@ def get_recovered_assets(post_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Wayback 相关（兼容 Pre-2005 静态站点与 2005+ TypePad/Bradford-DeLong 站点）
+# Wayback 相关
 # ---------------------------------------------------------------------------
 SITE_HOSTS = ("www.j-bradford-delong.net", "j-bradford-delong.net")
 
@@ -97,7 +102,6 @@ VERIFIED_WAYBACK_SNAPSHOTS = {
 
 
 def _clean_component(c: str) -> str:
-    """去掉本地备份目录的后缀：'archives--July 1 2003'、'2004_archives_copy'、'movable_type copy' 等。"""
     c = re.sub(r"--.*$", "", c)
     c = re.sub(r"[ _]copy( \d+)?$", "", c, flags=re.IGNORECASE)
     return c.strip()
@@ -106,7 +110,6 @@ def _clean_component(c: str) -> str:
 def get_wayback_info(
     rel_path: str, post_date: str, body_text: str, permalink: str = "", era: str = "pre-2005"
 ):
-    """返回 (年份首页快照, 年份, 时间戳, 候选原站URL列表, 年份日历页)"""
     rel = str(rel_path or "").replace("\\", "/").strip()
     pdate = str(post_date or "").strip()
     perm = str(permalink or "").strip()
@@ -128,7 +131,6 @@ def get_wayback_info(
         ts = f"{yr}0701"
 
     urls = []
-    # 1. TypePad 时期文章优先使用 permalink 及推算的 delong.typepad.com 地址
     if era == "typepad" or rel.startswith("typepad/"):
         if perm:
             urls.append(perm)
@@ -142,7 +144,6 @@ def get_wayback_info(
         calendar = f"https://web.archive.org/web/{yr}*/http://delong.typepad.com/*"
         return home, yr, ts, urls, calendar
 
-    # 2. Pre-2005 时期目录推算逻辑
     parts = [_clean_component(c) for c in rel.split("/") if c.strip()]
     paths = []
     if parts:
@@ -182,7 +183,6 @@ def get_wayback_info(
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def find_closest_snapshot(urls: tuple, ts: str):
-    """依次查询 Wayback 官方接口，返回 (命中链接或None, 调试信息列表)。"""
     debug = []
     for u in urls:
         api = (
@@ -337,15 +337,16 @@ def _norm_title(t):
 def load_timeline_df():
     conn = get_db_connection()
     era_col = ", corpus_era" if HAS_TYPEPAD_SCHEMA else ", 'pre-2005' AS corpus_era"
+    genre_col = ", post_genre" if HAS_GENRE_SCHEMA else ", NULL AS post_genre"
     if HAS_MERGED_SCHEMA:
         df = pd.read_sql_query(
-            f"SELECT rel_path, title, post_date, exact_post_datetime, is_canonical_post, is_unique_corpus{era_col} "
+            f"SELECT rel_path, title, post_date, exact_post_datetime, is_canonical_post, is_unique_corpus{era_col}{genre_col} "
             "FROM posts WHERE (exact_post_datetime IS NOT NULL) OR (post_date IS NOT NULL AND post_date != 'Unknown');",
             conn,
         )
     else:
         df = pd.read_sql_query(
-            f"SELECT rel_path, title, post_date{era_col} FROM posts "
+            f"SELECT rel_path, title, post_date{era_col}{genre_col} FROM posts "
             "WHERE post_date IS NOT NULL AND post_date != 'Unknown';",
             conn,
         )
@@ -386,7 +387,7 @@ st.sidebar.caption(
 st.sidebar.markdown(
     """
 **J. Bradford DeLong's Semi-Daily Journal**  
-A unified digital catalog spanning 25+ years of economic history, policy critiques, and academic discourse.
+A unified, genre-classified digital catalog spanning 25+ years of economic history, policy critiques, and academic discourse.
 """
 )
 st.sidebar.divider()
@@ -412,18 +413,19 @@ try:
             "SELECT COUNT(*) AS c FROM posts WHERE wayback_url IS NOT NULL;", conn
         ).iloc[0]["c"]
 
-    if HAS_TYPEPAD_SCHEMA:
-        tp_docs = pd.read_sql_query(
-            "SELECT COUNT(*) AS c FROM posts WHERE corpus_era = 'typepad';", conn
+    if HAS_GENRE_SCHEMA:
+        core_voice_docs = pd.read_sql_query(
+            "SELECT COUNT(*) AS c FROM posts WHERE is_unique_corpus = 1 AND post_genre IN ('essay_or_column', 'quote_commentary');",
+            conn,
         ).iloc[0]["c"]
     conn.close()
 
     st.sidebar.metric("Total Indexed Records", f"{total_posts:,}")
     if HAS_MERGED_SCHEMA:
         st.sidebar.metric("Unique Deduplicated Docs", f"{unique_docs:,}")
+        if HAS_GENRE_SCHEMA:
+            st.sidebar.metric("DeLong Core Voice (Essays + Commentary)", f"{core_voice_docs:,}")
         st.sidebar.metric("Canonical Blog Posts", f"{canonical_posts:,}")
-        if HAS_TYPEPAD_SCHEMA:
-            st.sidebar.metric("TypePad Era Entries (2005+)", f"{tp_docs:,}")
         st.sidebar.metric("Verified Wayback Links", f"{verified_wb:,}")
     else:
         st.sidebar.metric("Temporal Recovery Rate", f"{(dated_posts / total_posts):.1%}")
@@ -449,19 +451,21 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
     st.title("Search Brad DeLong's Weblog Archive")
     subtitle_era = "1995–Present" if HAS_TYPEPAD_SCHEMA else "Pre-2005"
     st.markdown(
-        f"**Explore deduplicated posts, essays, and course notes from Brad"
+        f"**Explore deduplicated posts, essays, and commentaries from Brad"
         f" DeLong's *Semi-Daily Journal* ({subtitle_era}).**  \n*Powered by SQLite FTS5,"
-        " CDX Wayback Provenance & HTML Content Renderer.*"
+        " LLM-Verified Genre Filtering & CDX Wayback Provenance.*"
     )
 
-    if HAS_MERGED_SCHEMA:
+    if HAS_MERGED_SCHEMA and HAS_GENRE_SCHEMA:
+        col1, col2, col_g, col3 = st.columns([2.1, 1.35, 1.45, 0.8])
+    elif HAS_MERGED_SCHEMA:
         col1, col2, col3 = st.columns([2.4, 1.6, 1])
     else:
         col1, col3 = st.columns([3, 1])
 
     with col1:
         query_text = st.text_input(
-            "Search keywords or phrases in DeLong's writings:",
+            "Search keywords or phrases:",
             value="Zhu Rongji",
             placeholder="e.g. Zhu Rongji, Greenspan, East Asian Crisis, Krugman",
         )
@@ -471,13 +475,12 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
         with col2:
             if HAS_TYPEPAD_SCHEMA:
                 corpus_scope = st.selectbox(
-                    "Corpus Scope:",
+                    "Era / Scope:",
                     [
                         "All Unique Archive (1995–Present)",
                         "Canonical Blog Posts (All Eras)",
-                        "TypePad Era Only (2005–Present)",
-                        "Pre-2005 Archive Only (1995–2005)",
-                        "Early Pages, Notebooks & Undated",
+                        "TypePad Era (2005–Present)",
+                        "Pre-2005 Archive (1995–2005)",
                         "All Raw Records (Unfiltered)",
                     ],
                     index=0,
@@ -487,11 +490,9 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
                 elif corpus_scope.startswith("Canonical Blog"):
                     scope_filter_sql = "AND p.is_canonical_post = 1"
                 elif corpus_scope.startswith("TypePad Era"):
-                    scope_filter_sql = "AND p.corpus_era = 'typepad' AND p.is_canonical_post = 1"
+                    scope_filter_sql = "AND p.corpus_era = 'typepad' AND p.is_unique_corpus = 1"
                 elif corpus_scope.startswith("Pre-2005"):
                     scope_filter_sql = "AND p.corpus_era = 'pre-2005' AND p.is_unique_corpus = 1"
-                elif corpus_scope.startswith("Early Pages"):
-                    scope_filter_sql = "AND p.is_unique_corpus = 1 AND p.is_canonical_post = 0"
             else:
                 corpus_scope = st.selectbox(
                     "Corpus Scope:",
@@ -510,6 +511,35 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
                 elif corpus_scope.startswith("Early Pages"):
                     scope_filter_sql = "AND p.is_unique_corpus = 1 AND p.is_canonical_post = 0"
 
+    genre_filter_sql = ""
+    if HAS_GENRE_SCHEMA:
+        with col_g:
+            genre_choice = st.selectbox(
+                "Content Genre:",
+                [
+                    "DeLong Core Voice (Essays + Commentary)",
+                    "Original Essays & Columns Only",
+                    "Quote + Commentary Only",
+                    "All Genres (Include Clippings & Syllabi)",
+                    "Clippings & Reader Mail Only",
+                    "Link Roundups Only",
+                    "Teaching & Meta Only",
+                ],
+                index=0,
+            )
+            if genre_choice.startswith("DeLong Core Voice"):
+                genre_filter_sql = "AND p.post_genre IN ('essay_or_column', 'quote_commentary')"
+            elif genre_choice.startswith("Original Essays"):
+                genre_filter_sql = "AND p.post_genre = 'essay_or_column'"
+            elif genre_choice.startswith("Quote + Commentary"):
+                genre_filter_sql = "AND p.post_genre = 'quote_commentary'"
+            elif genre_choice.startswith("Clippings"):
+                genre_filter_sql = "AND p.post_genre = 'clipping_or_mail'"
+            elif genre_choice.startswith("Link Roundups"):
+                genre_filter_sql = "AND p.post_genre = 'link_roundup'"
+            elif genre_choice.startswith("Teaching"):
+                genre_filter_sql = "AND p.post_genre = 'teaching_or_meta'"
+
     with col3:
         max_results = st.selectbox(
             "Max results:", [5, 10, 20, 50], index=1
@@ -522,10 +552,15 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
             if HAS_TYPEPAD_SCHEMA
             else "'pre-2005' AS corpus_era, NULL AS categories,"
         )
+        genre_select = (
+            "p.post_genre, p.quote_ratio,"
+            if HAS_GENRE_SCHEMA
+            else "NULL AS post_genre, 0.0 AS quote_ratio,"
+        )
         extra_select = (
-            f"p.exact_post_datetime, p.wayback_url, p.is_canonical_post, p.permalink, {era_select}"
+            f"p.exact_post_datetime, p.wayback_url, p.is_canonical_post, p.permalink, {era_select} {genre_select}"
             if HAS_MERGED_SCHEMA
-            else f"NULL AS exact_post_datetime, NULL AS wayback_url, 0 AS is_canonical_post, p.permalink, {era_select}"
+            else f"NULL AS exact_post_datetime, NULL AS wayback_url, 0 AS is_canonical_post, p.permalink, {era_select} {genre_select}"
         )
 
         search_sql = f"""
@@ -542,6 +577,7 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
         JOIN posts p ON posts_fts.rowid = p.id
         WHERE posts_fts MATCH ?
         {scope_filter_sql}
+        {genre_filter_sql}
         LIMIT ?;
         """
         try:
@@ -574,6 +610,7 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
                 raw_body = str(row["body_clean"]).strip() if row["body_clean"] else ""
                 is_local_valid = len(raw_body) > 40
                 era_val = str(row["corpus_era"] or "pre-2005")
+                genre_val = str(row["post_genre"] or "")
 
                 wb_home, yr_tag, wb_ts, post_urls, wb_calendar = get_wayback_info(
                     row["rel_path"], display_date, raw_body, row["permalink"], era_val
@@ -585,17 +622,21 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
                     top_c1, top_c2 = st.columns([3, 1])
                     with top_c1:
                         era_badge = (
-                            " | :violet[**✍️ TypePad Era**]"
+                            " | :violet[**TypePad Era**]"
                             if era_val == "typepad"
-                            else " | :blue[**🏛️ Pre-2005**]"
+                            else " | :blue[**Pre-2005**]"
                         )
+                        genre_badge = ""
+                        if genre_val in GENRE_LABELS:
+                            g_label, g_color = GENRE_LABELS[genre_val]
+                            genre_badge = f" | :{g_color}[**{g_label}**]"
                         cat_badge = (
                             f" | 🏷️ `{row['categories']}`"
                             if pd.notna(row["categories"]) and str(row["categories"]).strip()
                             else ""
                         )
                         st.caption(
-                            f"Record ID: `{row['id']}` | Source: `{row['rel_path']}` | Integrity: :{status_color}[{status_label}]{era_badge}{cat_badge}"
+                            f"ID: `{row['id']}` | Source: `{row['rel_path']}` | :{status_color}[{status_label}]{era_badge}{genre_badge}{cat_badge}"
                         )
                     with top_c2:
                         if is_local_valid:
@@ -639,7 +680,6 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
                         if len(recovered) > 6:
                             st.caption(f"...and {len(recovered) - 6} more recovered figures")
 
-                    # Wayback 链接（优先展示 CDX 精确匹配链接）
                     st.divider()
                     links = []
                     verified_wb_url = (
@@ -676,6 +716,7 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
                             st.code(
                                 f"wayback_url = {verified_wb_url}\n"
                                 f"permalink   = {row['permalink']!r}\n"
+                                f"post_genre  = {genre_val!r}\n"
                                 f"rel_path    = {row['rel_path']!r}"
                             )
                         elif post_urls:
@@ -705,7 +746,7 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
 elif nav_mode == "Posting Timeline & Trends":
     st.title("Brad DeLong's Publishing Timeline")
     st.markdown(
-        "*Volume of posts published across the archive, by date.*"
+        "*Volume of posts published across the archive, by date and genre.*"
     )
 
     try:
@@ -718,18 +759,22 @@ elif nav_mode == "Posting Timeline & Trends":
         st.info("No timeline data available.")
     else:
         c1, c2 = st.columns(2)
-        if HAS_MERGED_SCHEMA and HAS_TYPEPAD_SCHEMA:
+        if HAS_MERGED_SCHEMA and HAS_GENRE_SCHEMA:
             mode_options = [
+                "DeLong Core Voice (Essays + Commentaries)",
+                "Original Essays & Columns only",
                 "Canonical blog posts (All Eras)",
                 "All unique archive docs (deduplicated)",
                 "TypePad Era posts only (2005–Present)",
                 "Pre-2005 canonical posts only (2001–2005)",
                 "All dated records (raw)",
             ]
-        elif HAS_MERGED_SCHEMA:
+        elif HAS_MERGED_SCHEMA and HAS_TYPEPAD_SCHEMA:
             mode_options = [
-                "Canonical blog posts (2001–2005, 6,533)",
+                "Canonical blog posts (All Eras)",
                 "All unique archive docs (deduplicated)",
+                "TypePad Era posts only (2005–Present)",
+                "Pre-2005 canonical posts only (2001–2005)",
                 "All dated records (raw)",
             ]
         else:
@@ -740,36 +785,32 @@ elif nav_mode == "Posting Timeline & Trends":
         with c2:
             gran = st.radio("Granularity", ["By year", "By month"], horizontal=True)
 
-        if count_mode.startswith("Canonical blog"):
-            d = tl[tl["is_canonical_post"] == 1]
+        if count_mode.startswith("DeLong Core Voice"):
+            d = tl[
+                (tl["is_unique_corpus"] == 1)
+                & (tl["post_genre"].isin(["essay_or_column", "quote_commentary"]))
+            ]
             st.caption(
-                "All verified Movable Type & TypePad canonical blog posts across the corpus."
+                "Original essays, syndicated columns, and substantive quote commentaries authored by DeLong."
             )
+        elif count_mode.startswith("Original Essays"):
+            d = tl[(tl["is_unique_corpus"] == 1) & (tl["post_genre"] == "essay_or_column")]
+            st.caption("Standalone essays and columns primarily written by DeLong (< 30% quoted text).")
+        elif count_mode.startswith("Canonical blog"):
+            d = tl[tl["is_canonical_post"] == 1]
+            st.caption("All verified Movable Type & TypePad canonical blog posts across the corpus.")
         elif count_mode.startswith("TypePad Era"):
             d = tl[(tl["corpus_era"] == "typepad") & (tl["is_canonical_post"] == 1)]
-            st.caption(
-                "Canonical blog posts exported from the TypePad archive (2005–Present)."
-            )
+            st.caption("Canonical blog posts exported from the TypePad archive (2005–Present).")
         elif count_mode.startswith("Pre-2005"):
             d = tl[(tl["corpus_era"] == "pre-2005") & (tl["is_canonical_post"] == 1)]
-            st.caption(
-                "Exact individual Movable Type blog posts verified across the 2001–2005 archives."
-            )
+            st.caption("Exact individual Movable Type blog posts verified across the 2001–2005 archives.")
         elif count_mode.startswith("All unique"):
             d = tl[tl["is_unique_corpus"] == 1]
-            st.caption(
-                "All deduplicated documents (canonical blog posts + early essays, course pages & notebooks)."
-            )
-        elif count_mode.startswith("Unique"):
-            d = tl[tl["is_entry"]].drop_duplicates("dedupe_key")
-            st.caption(
-                "Only single-entry pages are counted, and copies across backup folders are merged."
-            )
+            st.caption("All deduplicated documents across all 5 genres.")
         else:
             d = tl
-            st.caption(
-                "Every record with a valid date, including aggregator pages and duplicate backup copies."
-            )
+            st.caption("Every record with a valid date, including aggregator pages and backup copies.")
 
         if d.empty:
             st.info("No records match this view.")
