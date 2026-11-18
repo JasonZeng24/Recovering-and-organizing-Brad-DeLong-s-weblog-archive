@@ -11,13 +11,14 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-# --- 1. 自动从 GitHub Release 缓存下载 DB 文件 ---
+# --- 1. 数据库路径与 GitHub Release 配置 ---
 DB_PATH = "weblog_corpus.db"
-# 注意：如果部署到 Streamlit Cloud，记得把新版 weblog_corpus.db 上传到 Release 并更新此处版本号
-RELEASE_URL = "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-/releases/download/V2.1/weblog_corpus.db"
+# 本地已有 weblog_corpus.db 时会直接使用本地文件；
+# 部署到 Streamlit Cloud 前，请将合并后的新版 weblog_corpus.db 上传至 GitHub Release（如 V3.0）并更新下方链接
+RELEASE_URL = "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-/releases/download/V3.0/weblog_corpus.db"
 
 st.set_page_config(
-    page_title="Brad DeLong's Weblog Archive (1995–2005)",
+    page_title="Brad DeLong's Weblog Archive (1995–Present)",
     page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -28,8 +29,7 @@ st.set_page_config(
 def ensure_database():
     if not os.path.exists(DB_PATH):
         with st.spinner(
-            "Downloading Brad DeLong's Corpus Database (~100MB+)... Please wait a"
-            " few seconds."
+            "Downloading Brad DeLong's Unified Corpus Database... Please wait a few seconds."
         ):
             urllib.request.urlretrieve(RELEASE_URL, DB_PATH)
 
@@ -43,7 +43,7 @@ def get_db_connection():
 
 @st.cache_data(show_spinner=False)
 def get_posts_columns() -> set[str]:
-    """检测当前 weblog_corpus.db 是否包含合并后的新字段，确保新旧库 100% 兼容。"""
+    """检测当前 weblog_corpus.db 包含的字段，确保新旧库 100% 兼容。"""
     conn = get_db_connection()
     try:
         return {row[1] for row in conn.execute("PRAGMA table_info(posts)").fetchall()}
@@ -52,12 +52,18 @@ def get_posts_columns() -> set[str]:
 
 
 POSTS_COLS = get_posts_columns()
-HAS_MERGED_SCHEMA = {"is_canonical_post", "is_unique_corpus", "wayback_url", "exact_post_datetime"}.issubset(POSTS_COLS)
+HAS_MERGED_SCHEMA = {
+    "is_canonical_post",
+    "is_unique_corpus",
+    "wayback_url",
+    "exact_post_datetime",
+}.issubset(POSTS_COLS)
+HAS_TYPEPAD_SCHEMA = {"corpus_era", "categories"}.issubset(POSTS_COLS)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_recovered_assets(post_id: int):
-    """Return a list of (orig_path, wayback_url) with hit status for the given post."""
+    """返回指定文章已从 Wayback 找回的图片列表 (orig_path, wayback_url)。"""
     conn = get_db_connection()
     try:
         has = conn.execute(
@@ -76,7 +82,7 @@ def get_recovered_assets(post_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Wayback 相关（用于未命中 CDX 精确快照时的兜底推算）
+# Wayback 相关（兼容 Pre-2005 静态站点与 2005+ TypePad/Bradford-DeLong 站点）
 # ---------------------------------------------------------------------------
 SITE_HOSTS = ("www.j-bradford-delong.net", "j-bradford-delong.net")
 
@@ -97,10 +103,13 @@ def _clean_component(c: str) -> str:
     return c.strip()
 
 
-def get_wayback_info(rel_path: str, post_date: str, body_text: str):
+def get_wayback_info(
+    rel_path: str, post_date: str, body_text: str, permalink: str = "", era: str = "pre-2005"
+):
     """返回 (年份首页快照, 年份, 时间戳, 候选原站URL列表, 年份日历页)"""
     rel = str(rel_path or "").replace("\\", "/").strip()
     pdate = str(post_date or "").strip()
+    perm = str(permalink or "").strip()
 
     dt = None
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%B %d, %Y"):
@@ -114,10 +123,26 @@ def get_wayback_info(rel_path: str, post_date: str, body_text: str):
         yr = str(dt.year)
         ts = dt.strftime("%Y%m%d")
     else:
-        m_yr = re.search(r"(200[0-5])", f"{rel} {pdate} {body_text[:400]}")
+        m_yr = re.search(r"(199\d|20[0-2]\d)", f"{rel} {pdate} {body_text[:400]}")
         yr = m_yr.group(1) if m_yr else "2003"
         ts = f"{yr}0701"
 
+    urls = []
+    # 1. TypePad 时期文章优先使用 permalink 及推算的 delong.typepad.com 地址
+    if era == "typepad" or rel.startswith("typepad/"):
+        if perm:
+            urls.append(perm)
+        parts = [c for c in rel.split("/") if c.strip()]
+        if dt and len(parts) >= 3 and parts[-1].endswith(".html"):
+            clean_slug = re.sub(r"_\d+\.html$", ".html", parts[-1])
+            tp_guess = f"http://delong.typepad.com/sdj/{dt.year}/{dt.month:02d}/{clean_slug}"
+            if tp_guess not in urls:
+                urls.append(tp_guess)
+        home = f"https://web.archive.org/web/{yr}0701/http://delong.typepad.com/sdj/"
+        calendar = f"https://web.archive.org/web/{yr}*/http://delong.typepad.com/*"
+        return home, yr, ts, urls, calendar
+
+    # 2. Pre-2005 时期目录推算逻辑
     parts = [_clean_component(c) for c in rel.split("/") if c.strip()]
     paths = []
     if parts:
@@ -144,7 +169,6 @@ def get_wayback_info(rel_path: str, post_date: str, body_text: str):
             else:
                 paths.append("/".join(quote(c) for c in parts))
 
-    urls = []
     for p in paths:
         for host in SITE_HOSTS:
             u = f"http://{host}/{p}"
@@ -312,15 +336,16 @@ def _norm_title(t):
 @st.cache_data(show_spinner=False)
 def load_timeline_df():
     conn = get_db_connection()
+    era_col = ", corpus_era" if HAS_TYPEPAD_SCHEMA else ", 'pre-2005' AS corpus_era"
     if HAS_MERGED_SCHEMA:
         df = pd.read_sql_query(
-            "SELECT rel_path, title, post_date, exact_post_datetime, is_canonical_post, is_unique_corpus "
+            f"SELECT rel_path, title, post_date, exact_post_datetime, is_canonical_post, is_unique_corpus{era_col} "
             "FROM posts WHERE (exact_post_datetime IS NOT NULL) OR (post_date IS NOT NULL AND post_date != 'Unknown');",
             conn,
         )
     else:
         df = pd.read_sql_query(
-            "SELECT rel_path, title, post_date FROM posts "
+            f"SELECT rel_path, title, post_date{era_col} FROM posts "
             "WHERE post_date IS NOT NULL AND post_date != 'Unknown';",
             conn,
         )
@@ -339,7 +364,7 @@ def load_timeline_df():
     df = df[(df["date"].dt.year >= 1990) & (df["date"].dt.year <= 2029)].copy()
 
     df["entry_key"] = df["rel_path"].map(_entry_key)
-    df["is_entry"] = df["entry_key"].notna()
+    df["is_entry"] = df["entry_key"].notna() | (df["corpus_era"] == "typepad")
 
     def _dedupe_key(row):
         nt = _norm_title(row["title"])
@@ -353,11 +378,15 @@ def load_timeline_df():
 
 # --- 2. 侧边栏 ---
 st.sidebar.title("🏛️ Brad DeLong's Corpus")
-st.sidebar.caption("UC Berkeley Economics | Pre-2005 Archive")
+st.sidebar.caption(
+    "UC Berkeley Economics | Full Archive (1995–Present)"
+    if HAS_TYPEPAD_SCHEMA
+    else "UC Berkeley Economics | Pre-2005 Archive"
+)
 st.sidebar.markdown(
     """
 **J. Bradford DeLong's Semi-Daily Journal**  
-A digital catalog with a mouth for 20+ years of economic history, policy critiques, and academic discourse.
+A unified digital catalog spanning 25+ years of economic history, policy critiques, and academic discourse.
 """
 )
 st.sidebar.divider()
@@ -382,12 +411,19 @@ try:
         verified_wb = pd.read_sql_query(
             "SELECT COUNT(*) AS c FROM posts WHERE wayback_url IS NOT NULL;", conn
         ).iloc[0]["c"]
+
+    if HAS_TYPEPAD_SCHEMA:
+        tp_docs = pd.read_sql_query(
+            "SELECT COUNT(*) AS c FROM posts WHERE corpus_era = 'typepad';", conn
+        ).iloc[0]["c"]
     conn.close()
 
-    st.sidebar.metric("Total Indexed HTML Files", f"{total_posts:,}")
+    st.sidebar.metric("Total Indexed Records", f"{total_posts:,}")
     if HAS_MERGED_SCHEMA:
         st.sidebar.metric("Unique Deduplicated Docs", f"{unique_docs:,}")
-        st.sidebar.metric("Canonical Blog Posts (2001–05)", f"{canonical_posts:,}")
+        st.sidebar.metric("Canonical Blog Posts", f"{canonical_posts:,}")
+        if HAS_TYPEPAD_SCHEMA:
+            st.sidebar.metric("TypePad Era Entries (2005+)", f"{tp_docs:,}")
         st.sidebar.metric("Verified Wayback Links", f"{verified_wb:,}")
     else:
         st.sidebar.metric("Temporal Recovery Rate", f"{(dated_posts / total_posts):.1%}")
@@ -411,14 +447,15 @@ nav_mode = st.sidebar.radio(
 # --- 3. 页面 1：全文检索 ---
 if nav_mode == "DeLong Full-Text Search (FTS5)":
     st.title("Search Brad DeLong's Weblog Archive")
+    subtitle_era = "1995–Present" if HAS_TYPEPAD_SCHEMA else "Pre-2005"
     st.markdown(
-        "**Explore deduplicated posts, early essays, and course notes from Brad"
-        " DeLong's *Semi-Daily Journal* (Pre-2005).**  \n*Powered by SQLite FTS5,"
+        f"**Explore deduplicated posts, essays, and course notes from Brad"
+        f" DeLong's *Semi-Daily Journal* ({subtitle_era}).**  \n*Powered by SQLite FTS5,"
         " CDX Wayback Provenance & HTML Content Renderer.*"
     )
 
     if HAS_MERGED_SCHEMA:
-        col1, col2, col3 = st.columns([2.5, 1.5, 1])
+        col1, col2, col3 = st.columns([2.4, 1.6, 1])
     else:
         col1, col3 = st.columns([3, 1])
 
@@ -432,22 +469,46 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
     scope_filter_sql = ""
     if HAS_MERGED_SCHEMA:
         with col2:
-            corpus_scope = st.selectbox(
-                "Corpus Scope:",
-                [
-                    "Unique Archive (11,772 docs)",
-                    "Canonical Blog Posts (2001–2005, 6,533)",
-                    "Early Pages & Courses Only (5,239)",
-                    "All Raw Files (Unfiltered, 21,531)",
-                ],
-                index=0,
-            )
-            if corpus_scope.startswith("Unique Archive"):
-                scope_filter_sql = "AND p.is_unique_corpus = 1"
-            elif corpus_scope.startswith("Canonical Blog"):
-                scope_filter_sql = "AND p.is_canonical_post = 1"
-            elif corpus_scope.startswith("Early Pages"):
-                scope_filter_sql = "AND p.is_unique_corpus = 1 AND p.is_canonical_post = 0"
+            if HAS_TYPEPAD_SCHEMA:
+                corpus_scope = st.selectbox(
+                    "Corpus Scope:",
+                    [
+                        "All Unique Archive (1995–Present)",
+                        "Canonical Blog Posts (All Eras)",
+                        "TypePad Era Only (2005–Present)",
+                        "Pre-2005 Archive Only (1995–2005)",
+                        "Early Pages, Notebooks & Undated",
+                        "All Raw Records (Unfiltered)",
+                    ],
+                    index=0,
+                )
+                if corpus_scope.startswith("All Unique"):
+                    scope_filter_sql = "AND p.is_unique_corpus = 1"
+                elif corpus_scope.startswith("Canonical Blog"):
+                    scope_filter_sql = "AND p.is_canonical_post = 1"
+                elif corpus_scope.startswith("TypePad Era"):
+                    scope_filter_sql = "AND p.corpus_era = 'typepad' AND p.is_canonical_post = 1"
+                elif corpus_scope.startswith("Pre-2005"):
+                    scope_filter_sql = "AND p.corpus_era = 'pre-2005' AND p.is_unique_corpus = 1"
+                elif corpus_scope.startswith("Early Pages"):
+                    scope_filter_sql = "AND p.is_unique_corpus = 1 AND p.is_canonical_post = 0"
+            else:
+                corpus_scope = st.selectbox(
+                    "Corpus Scope:",
+                    [
+                        "Unique Archive (11,772 docs)",
+                        "Canonical Blog Posts (2001–2005, 6,533)",
+                        "Early Pages & Courses Only (5,239)",
+                        "All Raw Files (Unfiltered, 21,531)",
+                    ],
+                    index=0,
+                )
+                if corpus_scope.startswith("Unique Archive"):
+                    scope_filter_sql = "AND p.is_unique_corpus = 1"
+                elif corpus_scope.startswith("Canonical Blog"):
+                    scope_filter_sql = "AND p.is_canonical_post = 1"
+                elif corpus_scope.startswith("Early Pages"):
+                    scope_filter_sql = "AND p.is_unique_corpus = 1 AND p.is_canonical_post = 0"
 
     with col3:
         max_results = st.selectbox(
@@ -456,10 +517,15 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
 
     if query_text.strip():
         conn = get_db_connection()
+        era_select = (
+            "p.corpus_era, p.categories,"
+            if HAS_TYPEPAD_SCHEMA
+            else "'pre-2005' AS corpus_era, NULL AS categories,"
+        )
         extra_select = (
-            "p.exact_post_datetime, p.wayback_url, p.is_canonical_post, p.permalink,"
+            f"p.exact_post_datetime, p.wayback_url, p.is_canonical_post, p.permalink, {era_select}"
             if HAS_MERGED_SCHEMA
-            else "NULL AS exact_post_datetime, NULL AS wayback_url, 0 AS is_canonical_post, p.permalink,"
+            else f"NULL AS exact_post_datetime, NULL AS wayback_url, 0 AS is_canonical_post, p.permalink, {era_select}"
         )
 
         search_sql = f"""
@@ -507,9 +573,10 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
 
                 raw_body = str(row["body_clean"]).strip() if row["body_clean"] else ""
                 is_local_valid = len(raw_body) > 40
+                era_val = str(row["corpus_era"] or "pre-2005")
 
                 wb_home, yr_tag, wb_ts, post_urls, wb_calendar = get_wayback_info(
-                    row["rel_path"], display_date, raw_body
+                    row["rel_path"], display_date, raw_body, row["permalink"], era_val
                 )
 
                 with st.expander(
@@ -517,13 +584,18 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
                 ):
                     top_c1, top_c2 = st.columns([3, 1])
                     with top_c1:
-                        canonical_tag = (
-                            " | :blue[**🏛️ Canonical Blog Post**]"
-                            if row["is_canonical_post"] == 1
+                        era_badge = (
+                            " | :violet[**✍️ TypePad Era**]"
+                            if era_val == "typepad"
+                            else " | :blue[**🏛️ Pre-2005**]"
+                        )
+                        cat_badge = (
+                            f" | 🏷️ `{row['categories']}`"
+                            if pd.notna(row["categories"]) and str(row["categories"]).strip()
                             else ""
                         )
                         st.caption(
-                            f"Record ID: `{row['id']}` | Local File: `{row['rel_path']}` | Integrity: :{status_color}[{status_label}]{canonical_tag}"
+                            f"Record ID: `{row['id']}` | Source: `{row['rel_path']}` | Integrity: :{status_color}[{status_label}]{era_badge}{cat_badge}"
                         )
                     with top_c2:
                         if is_local_valid:
@@ -633,7 +705,7 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
 elif nav_mode == "Posting Timeline & Trends":
     st.title("Brad DeLong's Publishing Timeline")
     st.markdown(
-        "*Volume of posts published across the pre-2005 archive, by date.*"
+        "*Volume of posts published across the archive, by date.*"
     )
 
     try:
@@ -646,15 +718,23 @@ elif nav_mode == "Posting Timeline & Trends":
         st.info("No timeline data available.")
     else:
         c1, c2 = st.columns(2)
-        mode_options = (
-            [
+        if HAS_MERGED_SCHEMA and HAS_TYPEPAD_SCHEMA:
+            mode_options = [
+                "Canonical blog posts (All Eras)",
+                "All unique archive docs (deduplicated)",
+                "TypePad Era posts only (2005–Present)",
+                "Pre-2005 canonical posts only (2001–2005)",
+                "All dated records (raw)",
+            ]
+        elif HAS_MERGED_SCHEMA:
+            mode_options = [
                 "Canonical blog posts (2001–2005, 6,533)",
                 "All unique archive docs (deduplicated)",
                 "All dated records (raw)",
             ]
-            if HAS_MERGED_SCHEMA
-            else ["Unique posts (deduplicated)", "All dated records"]
-        )
+        else:
+            mode_options = ["Unique posts (deduplicated)", "All dated records"]
+
         with c1:
             count_mode = st.radio("Count", mode_options, horizontal=False)
         with c2:
@@ -663,12 +743,22 @@ elif nav_mode == "Posting Timeline & Trends":
         if count_mode.startswith("Canonical blog"):
             d = tl[tl["is_canonical_post"] == 1]
             st.caption(
-                "Exact 6,533 individual Movable Type blog posts verified across the 2001–2005 archives."
+                "All verified Movable Type & TypePad canonical blog posts across the corpus."
+            )
+        elif count_mode.startswith("TypePad Era"):
+            d = tl[(tl["corpus_era"] == "typepad") & (tl["is_canonical_post"] == 1)]
+            st.caption(
+                "Canonical blog posts exported from the TypePad archive (2005–Present)."
+            )
+        elif count_mode.startswith("Pre-2005"):
+            d = tl[(tl["corpus_era"] == "pre-2005") & (tl["is_canonical_post"] == 1)]
+            st.caption(
+                "Exact individual Movable Type blog posts verified across the 2001–2005 archives."
             )
         elif count_mode.startswith("All unique"):
             d = tl[tl["is_unique_corpus"] == 1]
             st.caption(
-                "All 11,772 deduplicated documents (canonical blog posts + early essays & course pages)."
+                "All deduplicated documents (canonical blog posts + early essays, course pages & notebooks)."
             )
         elif count_mode.startswith("Unique"):
             d = tl[tl["is_entry"]].drop_duplicates("dedupe_key")
@@ -708,10 +798,9 @@ elif nav_mode == "Posting Timeline & Trends":
 elif nav_mode == "Resource Health Audit":
     st.title("Asset Recovery & Health Audit")
     st.markdown(
-        "*494 posts referenced images we couldn't bundle locally. We triaged every"
-        " missing path into **chart / chrome / desktop / other** and queried the"
-        " Wayback Machine to see which of DeLong's own figures can be rendered"
-        " back into the article view.*"
+        "*Posts across both the Pre-2005 archive and TypePad export referenced external or local images that"
+        " couldn't be bundled locally. We triaged every missing path into **chart / chrome / desktop / other**"
+        " and queried the Wayback Machine to see which figures can be rendered back into the article view.*"
     )
 
     conn = get_db_connection()
@@ -760,7 +849,7 @@ elif nav_mode == "Resource Health Audit":
         st.subheader("Triage of missing-asset references")
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Total refs", f"{total:,}")
-        c2.metric("📊 DeLong charts", f"{n_chart:,}", help="Figures from j-bradford-delong.net — recoverable via Wayback")
+        c2.metric("📊 DeLong charts", f"{n_chart:,}", help="Figures from j-bradford-delong.net / TypePad — recoverable via Wayback")
         c3.metric("🧩 Third-party chrome", f"{n_chrome:,}", help="LA Times logo, nav icons, spacers — skip")
         c4.metric("💾 Desktop folder", f"{n_desktop:,}", help="Files from DeLong's local Mac Desktop — unrecoverable")
         c5.metric("❓ Other", f"{n_other:,}")
