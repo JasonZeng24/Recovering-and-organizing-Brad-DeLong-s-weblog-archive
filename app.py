@@ -11,12 +11,26 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-# --- 1. 数据库路径与 GitHub Release 配置 ---
+# --- 1. 数据库与 Brain 索引路径及 GitHub Release 配置 ---
 DB_PATH = "weblog_corpus.db"
-RELEASE_URL = "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-/releases/download/V3.2/weblog_corpus.db"
+INDEX_DB_PATH = "brain_index.db"
+VECTORS_PATH = "brain_vectors.npy"
+
+CORPUS_RELEASE_URL = (
+    "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
+    "/releases/download/V3.2/weblog_corpus.db"
+)
+BRAIN_INDEX_RELEASE_URL = (
+    "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
+    "/releases/download/brain-v1.0/brain_index.db"
+)
+BRAIN_VECTORS_RELEASE_URL = (
+    "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
+    "/releases/download/brain-v1.0/brain_vectors.npy"
+)
 
 st.set_page_config(
-    page_title="Brad DeLong's Weblog Archive (1995–Present)",
+    page_title="Brad DeLong's Weblog Archive & Brain (1995–Present)",
     page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -27,12 +41,28 @@ st.set_page_config(
 def ensure_database():
     if not os.path.exists(DB_PATH):
         with st.spinner(
-            "Downloading Brad DeLong's Unified Corpus Database... Please wait a few seconds."
+            "Downloading Brad DeLong's Unified Corpus Database (V3.2)... Please wait a few seconds."
         ):
-            urllib.request.urlretrieve(RELEASE_URL, DB_PATH)
+            urllib.request.urlretrieve(CORPUS_RELEASE_URL, DB_PATH)
 
 
 ensure_database()
+
+
+def check_ollama_available() -> bool:
+    try:
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def download_brain_artifacts():
+    if not os.path.exists(INDEX_DB_PATH):
+        urllib.request.urlretrieve(BRAIN_INDEX_RELEASE_URL, INDEX_DB_PATH)
+    if not os.path.exists(VECTORS_PATH):
+        urllib.request.urlretrieve(BRAIN_VECTORS_RELEASE_URL, VECTORS_PATH)
 
 
 def get_db_connection():
@@ -441,6 +471,7 @@ nav_mode = st.sidebar.radio(
     "Navigation",
     [
         "DeLong Full-Text Search (FTS5)",
+        "🧠 Brain (Longitudinal Agent)",
         "Posting Timeline & Trends",
         "Resource Health Audit",
     ],
@@ -742,7 +773,93 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
             st.error(f"Search query error: {err}")
             conn.close()
 
-# --- 4. 页面 2：发帖时间轴趋势 ---
+# --- 4. 页面 2：Brain 跨年代混合推理 Agent ---
+elif nav_mode == "🧠 Brain (Longitudinal Agent)":
+    st.title("🧠 Brain — Longitudinal Corpus Research Agent")
+    st.markdown(
+        "**Ask cross-era, comparative, or quantitative questions across 14,103 deduplicated core writings.**  \n"
+        "*Powered by Hybrid SQLite Aggregations, 768d Dense Vector Retrieval (`nomic-embed-text`), and Local `qwen2.5:14b`.*"
+    )
+
+    index_ready = os.path.exists(INDEX_DB_PATH) and os.path.exists(VECTORS_PATH)
+    ollama_ready = check_ollama_available()
+
+    s_col1, s_col2, s_col3 = st.columns(3)
+    s_col1.metric("Corpus Database", "Ready" if os.path.exists(DB_PATH) else "Missing")
+    s_col2.metric("Semantic Index (brain-v1.0)", "Ready" if index_ready else "Not Downloaded")
+    s_col3.metric("Local Ollama Engine", "Connected" if ollama_ready else "Offline")
+
+    if not index_ready:
+        st.warning(
+            "Semantic index artifacts (`brain_index.db` & `brain_vectors.npy`) were not found in the local root directory."
+        )
+        if st.button("⬇️ Download Brain Semantic Index (`brain-v1.0` from GitHub Release)"):
+            with st.spinner("Downloading `brain_index.db` and `brain_vectors.npy`..."):
+                download_brain_artifacts()
+            st.rerun()
+
+    if not ollama_ready:
+        st.info(
+            "**Brain runs locally via Ollama (`qwen2.5:14b` + `nomic-embed-text`).**\n\n"
+            "If you are viewing this app on Streamlit Cloud, switch to **DeLong Full-Text Search (FTS5)** in the sidebar "
+            "for instant keyword queries, or run `streamlit run app.py` locally with Ollama active to unlock Brain."
+        )
+
+    if index_ready and ollama_ready:
+        from brain_engine import ask_delong_brain
+
+        if "brain_question" not in st.session_state:
+            st.session_state["brain_question"] = ""
+
+        presets = [
+            "How did Brad DeLong's view on Alan Greenspan and Fed monetary policy evolve between pre-2007 and post-2008? Include yearly SQL mention counts.",
+            "Compare DeLong's assessment of NAFTA and free trade in the late 1990s versus post-2017.",
+            "How did DeLong view Vladimir Putin in the pre-2005 era versus post-2017?",
+            "Show yearly publication counts by genre across the entire deduplicated corpus using SQL, and summarize the main structural eras.",
+        ]
+
+        st.caption("Sample Research Prompts:")
+        p_cols = st.columns(2)
+        for idx, p_text in enumerate(presets):
+            if p_cols[idx % 2].button(p_text, key=f"brain_preset_{idx}", use_container_width=True):
+                st.session_state["brain_question"] = p_text
+
+        user_q = st.text_area(
+            "Research Question",
+            key="brain_question",
+            height=95,
+            placeholder="Ask a longitudinal, comparative, or quantitative question about Brad DeLong's writings...",
+        )
+
+        if st.button("Run Brain Analysis", type="primary", disabled=not user_q.strip()):
+            with st.status("Executing hybrid SQL & cross-era semantic retrieval...", expanded=True) as status:
+                result = ask_delong_brain(
+                    user_q.strip(),
+                    on_step=lambda msg: status.write(f"• {msg}"),
+                )
+                status.update(label="Analysis complete", state="complete", expanded=False)
+
+            st.markdown(result["answer"])
+
+            with st.expander("🛠 Executed SQL & Semantic Search Queries"):
+                for i, step in enumerate(result["tool_trace"], 1):
+                    st.markdown(f"**Step {i}: `{step['tool']}`**")
+                    st.json(step["args"])
+                    if step["tool"] == "run_corpus_sql":
+                        st.json(step["result_summary"])
+
+            with st.expander(f"📚 Retrieved Candidate Sources ({len(result['sources'])} unique posts)"):
+                for src in result["sources"]:
+                    st.markdown(
+                        f"**[{src['date']} | {src['title']}]** "
+                        f"(Genre: `{src['genre']}`, Similarity: `{src['similarity']}`)"
+                    )
+                    if str(src["wayback_url"]).startswith("http"):
+                        st.markdown(f"Archive URL: [{src['wayback_url']}]({src['wayback_url']})")
+                    st.caption(src.get("full_excerpt") or src["excerpt"])
+                    st.divider()
+
+# --- 5. 页面 3：发帖时间轴趋势 ---
 elif nav_mode == "Posting Timeline & Trends":
     st.title("Brad DeLong's Publishing Timeline")
     st.markdown(
@@ -835,7 +952,7 @@ elif nav_mode == "Posting Timeline & Trends":
             st.bar_chart(chart_df, color="#003262")
             st.dataframe(chart_df.reset_index(), use_container_width=True)
 
-# --- 5. 页面 3：Asset Recovery ---
+# --- 6. 页面 4：Asset Recovery ---
 elif nav_mode == "Resource Health Audit":
     st.title("Asset Recovery & Health Audit")
     st.markdown(
