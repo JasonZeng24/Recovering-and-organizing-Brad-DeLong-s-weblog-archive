@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 
 # --- 1. 数据库路径与 GitHub Release 配置 ---
 DB_PATH = "weblog_corpus.db"
-RELEASE_URL = "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-/releases/download/V3.1/weblog_corpus.db"
+RELEASE_URL = "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-/releases/download/V3.2/weblog_corpus.db"
 
 st.set_page_config(
     page_title="Brad DeLong's Weblog Archive (1995–Present)",
