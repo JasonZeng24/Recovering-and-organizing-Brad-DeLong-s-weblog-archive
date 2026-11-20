@@ -18,15 +18,15 @@ VECTORS_PATH = "brain_vectors.npy"
 
 CORPUS_RELEASE_URL = (
     "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
-    "/releases/download/V3.2/weblog_corpus.db"
+    "/releases/download/V3.3/weblog_corpus.db"
 )
 BRAIN_INDEX_RELEASE_URL = (
     "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
-    "/releases/download/brain-v1.0/brain_index.db"
+    "/releases/download/brain-v1.1/brain_index.db"
 )
 BRAIN_VECTORS_RELEASE_URL = (
     "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
-    "/releases/download/brain-v1.0/brain_vectors.npy"
+    "/releases/download/brain-v1.1/brain_vectors.npy"
 )
 
 st.set_page_config(
