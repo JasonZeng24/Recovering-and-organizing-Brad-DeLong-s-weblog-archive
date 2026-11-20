@@ -1,0 +1,233 @@
+Brad DeLong CDSS Weblog Archive Project
+Work to date — Emily Liang, UC Berkeley Data Discovery
+Updated: 10 November 2026
+
+This file is a record of what has been done so far: sources used,
+findings, deliverables, and what is still open. Original archive ZIPs
+were never modified.
+
+
+1. Project
+----------
+Preserve and organize Brad DeLong’s weblog archive across eras
+(pre-TypePad / Movable Type, TypePad, later WordPress/Substack),
+with enough metadata and provenance to rebuild a continuous,
+queryable historical archive.
+
+Immediate assigned work has been the Movable Type HTML archives
+(2001–2005), then a metadata table for matching local files to
+historical URLs.
+
+
+2. Original sources (ground truth — do not modify)
+--------------------------------------------------
+2005-movable-type-archives.zip
+  Folders: 2005_archives, 2005-2_archives, 2005-3_archives
+  About 2,812 ZIP entries: 2,051 HTML, 740 XML
+  Apparent individual posts: 1,927 numeric HTML files
+  Non-post HTML (category/monthly index pages): 124
+
+pre-2005-movable-type-archives-for-emily-liang.zip
+  Folders: 2003_archives, 2004_archives, 2004-2_archives,
+           2003_archives--July 1 2003 (snapshot)
+  There are no 2001/ or 2002/ directories. Posts from those years
+  (and some earlier paper dates) live inside 2003_archives.
+
+XML files were inspected, then left unused for the inventories.
+They were not deleted from the ZIPs.
+
+
+3. Important findings
+---------------------
+Filenames are not globally unique.
+  000001.html appears in multiple archive folders and is different
+  posts. The identifier is the full path inside the ZIP, e.g.
+  2005_archives/000082.html
+
+The “2005” ZIP includes late 2004 posts.
+  First 2005 inventory dates: 2004-09-10 through 2005-12-21.
+
+Dates must be taken only from:
+  Posted by DeLong at ...
+Not from:
+  Tracked on ...          (trackbacks)
+  Posted by: [someone]    (comments)
+
+XML files in the 2005 ZIP are RSS 0.91 trackback sidecars, not full
+Movable Type exports. They often contain the post title, a historical
+URL, a short excerpt, and trackback items (sometimes later spam).
+The XML number does not always match the HTML filename
+(example: 76.xml belongs with 000082.html, not 000076.html).
+Many posts have no XML sidecar (740 XML vs 1,927 posts).
+
+No standalone image/PDF files are stored in either ZIP.
+  HTML posts reference images and PDFs by URL only. Those URLs were
+  kept as placeholders.
+
+2003_archives--July 1 2003 is a snapshot.
+  1,346 numeric HTML files, all also present in 2003_archives.
+  Not double-counted in lists or the database.
+
+Some “Posted by” dates are 1986–2000.
+  These look like paper/publication dates typed into Movable Type,
+  not the start of daily blogging. They were kept in a side list,
+  not discarded.
+
+The live Movable Type host is down.
+  http://www.j-bradford-delong.net/movable_type/... times out.
+  Historical copies are on the Wayback Machine.
+
+
+4. Phase 1 — 2005 chronological HTML inventory
+----------------------------------------------
+Deliverable:
+  delong_2005_html_posts_by_date.csv
+  1,927 individual posts, ordered by original posting date
+
+Also:
+  excluded_non_post_html_files.txt  (124 non-post HTML files)
+
+Counts by folder:
+  2005_archives:      79
+  2005-2_archives:    41
+  2005-3_archives: 1,807
+
+Posts with image/PDF/other file references in the post body: 135
+Total such references: 189
+Posts with empty title (site name only): 7
+Possible duplicate groups (same title+date, not merged): 10
+
+Share folder: for_delong/
+Share zip:    delong_2005_html_inventory.zip
+
+
+5. Phase 2 — Annual lists for 2001–2004, then SQL
+-------------------------------------------------
+Brad asked for equivalent lists for 2004, 2003, 2002, and 2001,
+then a SQL database with body text and resource paths.
+
+Standalone 2001–2004 package (does not extend the 2005 CSV):
+  delong_2001_html_posts_by_date.csv     36 posts
+  delong_2002_html_posts_by_date.csv    530 posts
+  delong_2003_html_posts_by_date.csv  1,830 posts
+  delong_2004_html_posts_by_date.csv  2,050 posts
+  delong_pre2001_html_posts_by_date.csv
+      160 extra posts dated 1986–2000
+  delong_2001_2004_movable_type.sqlite
+      same posts, plus body_html, body_text, resource_paths
+
+Share folder: for_delong_2001_2004/
+Share zip:    delong_2001_2004_movable_type_inventory.zip
+
+A combined SQLite of pre-2005 + 2005 posts also exists:
+  delong_movable_type.sqlite
+  6,533 posts total
+  tables: posts, resources
+
+Note: if 2004-dated posts from the 2005 ZIP are included, the 2004
+count is 2,260 and the 2005-dated count is 1,717. The standalone
+2001–2004 package uses only the pre-2005 ZIP (2004 = 2,050).
+
+
+6. Phase 3 — URL-matching metadata table
+----------------------------------------
+Brad asked for a small metadata database (CSV is enough) to match
+local HTML files to historical and current URLs.
+
+Proposed approach (emailed 10 Oct 2026):
+  1. Extract permalinks and metadata from the local HTML
+  2. Reconcile against the Wayback Machine CDX index
+  3. Search current sites (WordPress/Substack) for migrated copies
+  4. Use content matching for unresolved cases
+
+The constructed table:
+  for_delong_url_metadata/delong_url_metadata.csv
+  6,533 rows, 29 columns
+  Share zip: delong_url_metadata_table.zip
+
+Columns
+  Identity
+    local_id, source_zip, archive_directory, html_filename,
+    original_local_path
+  Extracted from HTML (filled)
+    title, original_posting_datetime, original_posting_year,
+    extracted_permalink, permalink_source, previous_post_url,
+    next_post_url, movable_type_entry_id
+  Live URL check (filled)
+    live_url_status, live_http_status, live_final_url, live_checked_at
+  Wayback (filled)
+    wayback_status, wayback_url, wayback_timestamp, wayback_match_notes
+  Current / migrated site (not invented)
+    current_url, current_url_source, current_url_status
+  Content match
+    match_method, match_confidence, match_notes
+  Working
+    reconciliation_status, notes
+
+Results
+  Wayback found:     6,513  (earliest status-200 CDX capture of the permalink)
+  Wayback not found:    20  (no capture in the CDX index; not guessed)
+  Live URLs:         all broken/timeout on j-bradford-delong.net
+  Current-site URLs: left not_checked (no verified 1:1 map yet)
+  match_method:      url_exact where Wayback found the same permalink;
+                     body text was not compared
+
+Example Wayback URL:
+  https://web.archive.org/web/20050103030326/http://www.j-bradford-delong.net/movable_type/2005-3_archives/000082.html
+
+
+7. Reproducible scripts
+-----------------------
+build_html_inventory.py
+  2005 chronological post list from the 2005 ZIP
+
+extract_one_post.py
+  Early teaching script: title/date/media from one HTML file
+
+build_annual_lists_and_sql.py
+  2001–2005 annual CSVs + SQLite with body text and resource URLs
+
+build_url_metadata_csv.py
+  Identity + HTML-extracted URL metadata for all 6,533 posts
+
+fill_url_metadata_table.py
+  Fills Wayback CDX and live-URL columns
+
+
+8. Preservation rules followed
+------------------------------
+- Never modified the original ZIPs
+- Kept original filenames and paths
+- Did not invent missing titles, dates, or current-site URLs
+- Did not silently deduplicate
+- Labeled uncertain dates (pre-2001 paper dates, trackback vs post)
+- Preserved media URLs even when the files are not in the ZIP
+- Transformations are scripts that can be re-run
+
+
+9. What is still open
+---------------------
+- Fill current_url from jbdelong.wordpress.com and/or Substack
+  (title/date matching; do not assume the old filename is the new slug)
+- Content-based matching for the 20 posts with no Wayback capture,
+  and for possible WordPress/Substack reprints
+- Decide what to do with possible duplicate groups and the July 1
+  2003 snapshot
+- TypePad-era material, pre-Movable Type organization, link-rot
+  repair, and a canonical ID scheme for the larger archive
+- Import into WordPress/Substack is not the current stage
+
+
+10. Files to send Brad (no personal computer paths inside)
+----------------------------------------------------------
+2005 inventory:
+  delong_2005_html_inventory.zip
+
+2001–2004 lists + SQLite (new file, not an extension of 2005):
+  delong_2001_2004_movable_type_inventory.zip
+
+URL metadata table (constructed):
+  delong_url_metadata_table.zip
+
+This record:
+  DeLong_archive_project_work_to_date.txt
