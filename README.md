@@ -6,12 +6,12 @@ Recovering and organizing J. Bradford DeLong's weblog archive — a Streamlit re
 
 ## The problem
 
-DeLong's *Semi-Daily Journal* spans nearly three decades, but surviving pre-2005 copies are scattered across overlapping backup folders, aggregator index pages, and early static course directories, while many referenced figures were never bundled locally. This project consolidates the archive into a deduplicated, genre-classified database with verified Wayback Machine provenance, missing-asset recovery, and a longitudinal hybrid RAG agent (**DeLong Brain**).
+DeLong's *Semi-Daily Journal* spans nearly three decades, but surviving pre-2005 copies are scattered across overlapping backup folders, aggregator index pages, and early static course directories, while many referenced figures were never bundled locally. This project consolidates the archive into a deduplicated, genre-classified database with verified Wayback Machine provenance, missing-asset recovery, and a longitudinal hybrid RAG agent (**Brain**).
 
 ## What it does
 
 - **Full-Text Search & Genre/Era Filtering (FTS5):** Search across the deduplicated corpus with scope and genre filters (`DeLong Core Voice`, `Original Essays & Columns`, `Quote + Commentary`, `Teaching & Meta`, `Clippings & Reader Mail`, `Link Roundups`), cleaned minute-level timestamps, a formatted HTML reader, and pre-verified Wayback Machine CDX snapshot links.
-- **DeLong Brain — Longitudinal Research Agent (`brain_engine.py`):** Hybrid retrieval agent combining read-only SQLite aggregations (`weblog_corpus.db`) with unified all-years 768-dimensional dense vector search (`nomic-embed-text`) + BM25 lexical fusion (`posts_fts`), per-year diversity sampling, and local LLM synthesis (`qwen2.5:14b` via Ollama) with inline Wayback citations. The Brain index artifacts (`brain_index.db`, `brain_vectors.npy`) are hosted in the [`brain-v1.2`](https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive/releases/tag/brain-v1.2) GitHub Release and downloaded on demand in the app.
+- **Brain — Longitudinal Research Agent (`brain_engine.py`):** Hybrid retrieval agent combining read-only SQLite aggregations (`weblog_corpus.db`) with unified all-years 768-dimensional dense vector search (`nomic-embed-text`) + BM25 lexical fusion (`posts_fts`), per-year diversity sampling, and local LLM synthesis (`qwen2.5:14b` via Ollama) with inline Wayback citations. The Brain index artifacts (`brain_index.db`, `brain_vectors.npy`) are hosted in the [`brain-v1.2`](https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive/releases/tag/brain-v1.2) GitHub Release and downloaded on demand in the app.
 - **Posting Timeline & Trends:** Volume of posts by year or month over the deduplicated corpus, eliminating inflated counts from duplicate backup folders (`copy` directories, `July 1 2003` snapshots) and aggregator index pages.
 - **Asset Recovery & Health Audit:** Every missing image path is classified as `chart` / `chrome` / `desktop` / `other`, and recoverable figures are queried against the Wayback Machine Availability API so they can be rendered directly inside the article reader.
 
@@ -42,7 +42,7 @@ streamlit run app.py
 
 On first run, the app automatically downloads the corpus database (`weblog_corpus.db`, [`V3.4`](https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive/releases/tag/V3.4)) from GitHub Releases.
 
-To run the **DeLong Brain** longitudinal research agent locally, ensure [Ollama](https://ollama.com/) is running with the required models pulled, then download the `brain-v1.2` index artifacts (`brain_index.db` and `brain_vectors.npy`) via the in-app button in the **🧠 Brain** tab (or directly from the [`brain-v1.2`](https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive/releases/tag/brain-v1.2) Release):
+To run the **Brain** longitudinal research agent locally, ensure [Ollama](https://ollama.com/) is running with the required models pulled, then download the `brain-v1.2` index artifacts (`brain_index.db` and `brain_vectors.npy`) via the in-app button in the **🧠 Brain** tab (or directly from the [`brain-v1.2`](https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive/releases/tag/brain-v1.2) Release):
 
 ```bash
 ollama pull qwen2.5:14b
@@ -54,7 +54,7 @@ The binary database and Brain vector artifacts are excluded from Git version con
 ## Repository layout
 
 ```text
-app.py                          # Streamlit app (FTS5 search, DeLong Brain agent, timeline, asset recovery)
+app.py                          # Streamlit app (FTS5 search, Brain agent, timeline, asset recovery)
 brain_engine.py                 # Hybrid SQL + all-years semantic RAG engine (Ollama qwen2.5:14b + nomic-embed-text)
 build_brain_index.py            # Build the Brain vector index and chunk metadata DB from weblog_corpus.db
 requirements.txt                # Third-party dependencies (streamlit, pandas, numpy)
@@ -100,7 +100,7 @@ python build_brain_index.py
 
 - **Nicole Shimamoto** — TypePad-era analysis: parsed the TypePad export (`typepad_archives.txt`), compared entries against Wayback captures (`notebooks/nicole/archive_analysis2.ipynb`, `comparison_results.csv`), and produced the poster figures in `notebooks/nicole/poster_figs/`.
 - **Emily Liang** — Movable Type inventories (2001–2005): chronological HTML inventories, the combined 6,533-post SQLite database, and the URL-matching metadata table (6,533 rows, Wayback found for 6,513); see `docs/emily/DeLong_archive_project_work_to_date.txt`.
-- **Jason Zeng** — Corpus database, Streamlit app, TypePad merge, LLM cleaning & V3.4 genre/directory audit, and the DeLong Brain hybrid SQL + semantic retrieval engine.
+- **Jason Zeng** — Corpus database, Streamlit app, TypePad merge, LLM cleaning & V3.4 genre/directory audit, and the Brain hybrid SQL + semantic retrieval engine.
 
 Raw exports and binary artifacts (e.g. `typepad_archives.txt`, the inventory ZIPs, `weblog_corpus.db`, `brain_index.db`, `brain_vectors.npy`) are intentionally excluded from version control; the notebooks, scripts, and records above document how they were built and verified.
 
