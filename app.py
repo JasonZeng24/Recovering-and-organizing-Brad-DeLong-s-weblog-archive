@@ -18,15 +18,15 @@ VECTORS_PATH = "brain_vectors.npy"
 
 CORPUS_RELEASE_URL = (
     "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
-    "/releases/download/V3.3/weblog_corpus.db"
+    "/releases/download/V3.4/weblog_corpus.db"
 )
 BRAIN_INDEX_RELEASE_URL = (
     "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
-    "/releases/download/brain-v1.1/brain_index.db"
+    "/releases/download/brain-v1.2/brain_index.db"
 )
 BRAIN_VECTORS_RELEASE_URL = (
     "https://github.com/JasonZeng24/Recovering-and-organizing-Brad-DeLong-s-weblog-archive-pre-2005-"
-    "/releases/download/brain-v1.1/brain_vectors.npy"
+    "/releases/download/brain-v1.2/brain_vectors.npy"
 )
 
 st.set_page_config(
@@ -41,7 +41,7 @@ st.set_page_config(
 def ensure_database():
     if not os.path.exists(DB_PATH):
         with st.spinner(
-            "Downloading Brad DeLong's Unified Corpus Database (V3.2)... Please wait a few seconds."
+            "Downloading Brad DeLong's Unified Corpus Database (V3.4)... Please wait a few seconds."
         ):
             urllib.request.urlretrieve(CORPUS_RELEASE_URL, DB_PATH)
 
@@ -777,7 +777,7 @@ if nav_mode == "DeLong Full-Text Search (FTS5)":
 elif nav_mode == "🧠 Brain (Longitudinal Agent)":
     st.title("🧠 Brain — Longitudinal Corpus Research Agent")
     st.markdown(
-        "**Ask cross-era, comparative, or quantitative questions across 14,103 deduplicated core writings.**  \n"
+        "**Ask longitudinal, comparative, or quantitative questions across 12,599 deduplicated core writings.**  \n"
         "*Powered by Hybrid SQLite Aggregations, 768d Dense Vector Retrieval (`nomic-embed-text`), and Local `qwen2.5:14b`.*"
     )
 
@@ -785,15 +785,15 @@ elif nav_mode == "🧠 Brain (Longitudinal Agent)":
     ollama_ready = check_ollama_available()
 
     s_col1, s_col2, s_col3 = st.columns(3)
-    s_col1.metric("Corpus Database", "Ready" if os.path.exists(DB_PATH) else "Missing")
-    s_col2.metric("Semantic Index (brain-v1.0)", "Ready" if index_ready else "Not Downloaded")
+    s_col1.metric("Corpus Database (V3.4)", "Ready" if os.path.exists(DB_PATH) else "Missing")
+    s_col2.metric("Semantic Index (brain-v1.2)", "Ready" if index_ready else "Not Downloaded")
     s_col3.metric("Local Ollama Engine", "Connected" if ollama_ready else "Offline")
 
     if not index_ready:
         st.warning(
             "Semantic index artifacts (`brain_index.db` & `brain_vectors.npy`) were not found in the local root directory."
         )
-        if st.button("⬇️ Download Brain Semantic Index (`brain-v1.0` from GitHub Release)"):
+        if st.button("⬇️ Download Brain Semantic Index (`brain-v1.2` from GitHub Release)"):
             with st.spinner("Downloading `brain_index.db` and `brain_vectors.npy`..."):
                 download_brain_artifacts()
             st.rerun()
@@ -812,10 +812,10 @@ elif nav_mode == "🧠 Brain (Longitudinal Agent)":
             st.session_state["brain_question"] = ""
 
         presets = [
-            "How did Brad DeLong's view on Alan Greenspan and Fed monetary policy evolve between pre-2007 and post-2008? Include yearly SQL mention counts.",
-            "Compare DeLong's assessment of NAFTA and free trade in the late 1990s versus post-2017.",
-            "How did DeLong view Vladimir Putin in the pre-2005 era versus post-2017?",
-            "Show yearly publication counts by genre across the entire deduplicated corpus using SQL, and summarize the main structural eras.",
+            "How did Brad DeLong's view on Alan Greenspan and Federal Reserve monetary policy evolve from the late 1990s through the post-2008 era?",
+            "What has Brad DeLong written about China's economic rise and WTO accession across the years? Include yearly mention counts from SQL.",
+            "How has Brad DeLong's perspective on Vladimir Putin and Russian political economy changed over time?",
+            "Show yearly publication counts by genre across the entire deduplicated corpus using SQL, and summarize the main publishing eras.",
         ]
 
         st.caption("Sample Research Prompts:")
@@ -831,7 +831,7 @@ elif nav_mode == "🧠 Brain (Longitudinal Agent)":
             placeholder="Ask a longitudinal, comparative, or quantitative question about Brad DeLong's writings...",
         )
 
-        if st.button("Run Brain Analysis", type="primary", disabled=not user_q.strip()):
+        if st.button("Run DeLong Brain Analysis", type="primary", disabled=not user_q.strip()):
             with st.status("Executing hybrid SQL & cross-era semantic retrieval...", expanded=True) as status:
                 result = ask_delong_brain(
                     user_q.strip(),
@@ -848,7 +848,7 @@ elif nav_mode == "🧠 Brain (Longitudinal Agent)":
                     if step["tool"] == "run_corpus_sql":
                         st.json(step["result_summary"])
 
-            with st.expander(f"📚 Retrieved Candidate Sources ({len(result['sources'])} unique posts)"):
+            with st.expander(f"📚 Cited Primary Sources ({len(result['sources'])} unique posts)"):
                 for src in result["sources"]:
                     st.markdown(
                         f"**[{src['date']} | {src['title']}]** "
